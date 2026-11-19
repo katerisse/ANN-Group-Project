@@ -9,14 +9,14 @@ __pycache__/
 !.env.example
 
 # ImageNet data and model artifacts (never commit these)
-data/
-raw/
+/data/
+/raw/
 *.tar
 *.tar.gz
 *.h5
 *.keras
-checkpoints/
-models/
+/checkpoints/
+/models/
 reports/raw/
 
 # OS files
