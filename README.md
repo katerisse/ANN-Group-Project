@@ -137,9 +137,29 @@ All methods freeze the 53 BatchNorm layers so neither moving statistics nor
 `gamma`/`beta` change. `FrozenStatsBatchNormalization` is the ablation that
 keeps statistics fixed while allowing `gamma`/`beta` to train.
 
+## Local ImageNet copy and manifests
+
+The on-device copy at `~/Documents/imagenet` has 1000 human-readable class
+folders (539,826 images) rather than the ILSVRC synset/train/val layout.
+`LocalLayout` maps those folders to the committed class index and resolves
+ambiguous names with explicit aliases; it fails closed on unknown or duplicate
+folders. Regenerate the split manifest with:
+
+```bash
+PYTHONPATH=src python scripts/build_local_manifest.py --root ~/Documents/imagenet
+```
+
+This writes `manifests/phase1_local.csv`, a metadata sidecar, a checksum, and
+`manifests/phase1_local_short_classes.json`. Generated manifests are ignored by
+git. All splits are drawn from one seeded per-class pool, so train, relearn,
+`val_tune` and `val_test` are disjoint. Four dog classes have fewer than the
+requested 170 images (`black_and_tan_coonhound` 135, `affenpinscher` 153,
+`sealyham_terrier` 161, `otterhound` 169); their budgets are scaled
+proportionally and recorded in the short-class report instead of being hidden.
+
 ## Current status
 
 PR1 adds the class index and acquisition CLI, PR2 adds splits and auditing,
-PR3 adds preprocessing and the loader, and PR4 adds the pinned model, weight
-verification, seeding, and BatchNorm policy. Real manifest generation is
-tracked separately.
+PR3 adds preprocessing and the loader, PR4 adds the pinned model, PR5–PR7 add
+metrics, methods and the training loop, and this segment adds the local dataset
+adapter and manifest builder. The full experiments remain outstanding.
