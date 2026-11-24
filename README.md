@@ -157,9 +157,19 @@ requested 170 images (`black_and_tan_coonhound` 135, `affenpinscher` 153,
 `sealyham_terrier` 161, `otterhound` 169); their budgets are scaled
 proportionally and recorded in the short-class report instead of being hidden.
 
+## CPU proxy
+
+`docs/phase1_cpu_proxy.md` records the 60-row, 2-step CPU smoke test across all
+six methods and three seeds, with reproduction commands, key metrics and its
+limitations. The committed `configs/phase1_cpu_proxy.yaml` and
+`manifests/phase1_proxy.csv` make that run reproducible; generated outputs under
+`results/` are ignored. The proxy is not an acceptance result and issue #7
+remains open.
+
 ## Current status
 
 PR1 adds the class index and acquisition CLI, PR2 adds splits and auditing,
 PR3 adds preprocessing and the loader, PR4 adds the pinned model, PR5–PR7 add
-metrics, methods and the training loop, and this segment adds the local dataset
-adapter and manifest builder. The full experiments remain outstanding.
+metrics, methods and the training loop, PR8–PR16 add the local adapter,
+manifests, harness, probes, MIA, relearning, runner, aggregation, mask fix and
+proxy documentation. The full experiments remain outstanding.
