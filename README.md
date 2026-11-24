@@ -1,8 +1,13 @@
-# ANN Group Project
+# ANN Group Project — Machine Unlearning in Animal-Image Classifiers
 
-Phase 1 builds a reproducible ImageNet data hook for class-unlearning experiments.
-The repo stores code, configs, and manifests only. Images, archives, weights, and
-credentials stay outside Git.
+Research question: how does withholding dog training data change what a classifier
+knows about dogs, and how can that be measured without degrading the remaining
+classes?
+
+Phase 1 builds a reproducible ImageNet data hook and unlearning evaluation for this
+question. The repo stores code, configs, and manifests only. Images, archives,
+weights, and credentials stay outside Git. See `AGENTS.md` for the issue, branch,
+review, and reproducibility rules that govern contributions.
 
 ## Setup
 
