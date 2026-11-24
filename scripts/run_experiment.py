@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import tempfile
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -103,6 +104,7 @@ def main() -> None:
                 save_checkpoints=config["save_checkpoints"],
             )
             student = load_resnet50()
+            started = time.monotonic()
             out_dir = out_root / f"{method}_s{seed}"
             trained, curve = train_method(
                 student, forget_ds, retain_ds, tune_ds, run_cfg, index,
@@ -143,6 +145,9 @@ def main() -> None:
                     epochs=config["relearning_epochs"],
                     seed=seed,
                 )
+            record["runtime_sec"] = round(time.monotonic() - started, 3)
+            record["tune_split"] = Split.VAL_TUNE.value
+            record["eval_split"] = Split.VAL_TEST.value
             (out_dir / "run.json").write_text(json.dumps(record, indent=2) + "\n")
             print(f"finished {method} seed={seed} -> {out_dir / 'run.json'}")
 
