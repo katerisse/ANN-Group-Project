@@ -11,8 +11,9 @@ from pathlib import Path
 
 import yaml
 
-from unlearning.classes import load_class_index
+from unlearning.classes import Group, load_class_index
 from unlearning.data.paths import get_root
+from unlearning.methods import mask
 from unlearning.data.tfdata import Purpose, build_dataset
 from unlearning.metrics import evaluate
 from unlearning.mia import run_mia
@@ -22,6 +23,13 @@ from unlearning.relearn import run_relearning
 from unlearning.seeding import set_seed
 from unlearning.splits import DataConfig, Split, load_manifest, write_manifest
 from unlearning.train import TrainConfig, _git_sha, collect_logits, train_method, run_name
+
+
+def finalize_logits(method: str, logits, index):
+    """Apply inference-only masking to final metrics for the mask baseline."""
+    if method == "mask":
+        return mask.mask_logits(logits, index.indices(Group.DOG))
+    return logits
 
 
 def _dataset(manifest, root, split, purpose, batch_size, max_batches, group=None):
@@ -114,6 +122,7 @@ def main() -> None:
                 saved.unlink()
 
             test_logits, test_labels = collect_logits(trained, test_ds)
+            test_logits = finalize_logits(method, test_logits, index)
             record = {
                 "method": method,
                 "seed": seed,
