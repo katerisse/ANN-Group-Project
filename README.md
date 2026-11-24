@@ -114,9 +114,32 @@ resize the shorter side to 256, crop to 224, RGB→BGR, and subtract
 `[103.939, 116.779, 123.68]` without scaling. Keep model-specific transforms
 behind the `Preprocessor` interface so CLIP can replace them later.
 
+## Model layer
+
+Phase 1 uses the unmodified Keras ImageNet ResNet50: 25,636,712 parameters,
+53 BatchNorm layers, a 224×224 RGB input, and 1000 logits
+(`classifier_activation=None`). Verify the pinned weights before use:
+
+```bash
+python scripts/verify_weights.py
+```
+
+Expected file: `resnet50_weights_tf_dim_ordering_tf_kernels.h5`, 102,967,424
+bytes, MD5 `2cb95161c43110f7111970584f804107`, SHA256
+`7011d39ea4f61f4ddb8da99c4addf3fae4209bfda7828adb4698b16283258fbe`.
+The loader fails closed on any mismatch and the weights are never committed.
+
+Use `unlearning.seeding.set_seed(seed)` for every run; for full determinism
+also export `TF_DETERMINISTIC_OPS=1`, `TF_CUDNN_DETERMINISTIC=1`, and
+`PYTHONHASHSEED=0` before Python starts.
+
+All methods freeze the 53 BatchNorm layers so neither moving statistics nor
+`gamma`/`beta` change. `FrozenStatsBatchNormalization` is the ablation that
+keeps statistics fixed while allowing `gamma`/`beta` to train.
+
 ## Current status
 
-PR1 adds the class index and acquisition CLI, PR2 adds splits and auditing, and
-PR3 adds preprocessing, the loader, and this documentation. The actual shared
-Drive upload and real manifest generation are deliberately deferred until the
-data is available.
+PR1 adds the class index and acquisition CLI, PR2 adds splits and auditing,
+PR3 adds preprocessing and the loader, and PR4 adds the pinned model, weight
+verification, seeding, and BatchNorm policy. Real manifest generation is
+tracked separately.
