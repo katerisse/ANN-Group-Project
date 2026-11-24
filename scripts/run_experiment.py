@@ -39,6 +39,50 @@ def _dataset(manifest, root, split, purpose, batch_size, max_batches, group=None
     return dataset.take(max_batches) if max_batches else dataset
 
 
+def build_datasets(manifest, root, batch_size, max_batches, tune_only):
+    """Build the datasets needed for a full run or a val_tune-only run."""
+    datasets = {
+        "forget": _dataset(
+            manifest, root, Split.TRAIN_FORGET, Purpose.TRAIN, batch_size, max_batches
+        ),
+        "retain": _dataset(
+            manifest, root, Split.TRAIN_RETAIN, Purpose.TRAIN, batch_size, max_batches
+        ),
+        "tune": _dataset(
+            manifest, root, Split.VAL_TUNE, Purpose.TUNE, batch_size, max_batches
+        ),
+    }
+    if tune_only:
+        return datasets
+
+    datasets.update(
+        {
+            "test": _dataset(
+                manifest, root, Split.VAL_TEST, Purpose.EVAL, batch_size, max_batches
+            ),
+            "forget_test": _dataset(
+                manifest, root, Split.VAL_TEST, Purpose.EVAL,
+                batch_size, max_batches, "dog",
+            ),
+            "retain_test": _dataset(
+                manifest, root, Split.VAL_TEST, Purpose.EVAL,
+                batch_size, max_batches, "canid",
+            ).concatenate(
+                _dataset(
+                    manifest, root, Split.VAL_TEST, Purpose.EVAL,
+                    batch_size, max_batches, "other",
+                )
+            ),
+        }
+    )
+    return datasets
+
+
+def eval_split(tune_only: bool) -> str:
+    """Return the split used for final metrics in the current mode."""
+    return Split.VAL_TUNE.value if tune_only else Split.VAL_TEST.value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("configs/phase1_resnet50.yaml"))
@@ -50,6 +94,11 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--max-batches", type=int, default=None)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--tune-only",
+        action="store_true",
+        help="Evaluate only on val_tune; never build or read val_test.",
+    )
     args = parser.parse_args()
 
     config = yaml.safe_load(args.config.read_text())
@@ -72,25 +121,28 @@ def main() -> None:
     out_root.mkdir(parents=True, exist_ok=True)
     rows = load_manifest(manifest)
 
-    forget_ds = _dataset(manifest, root, Split.TRAIN_FORGET, Purpose.TRAIN, batch_size, max_batches)
-    retain_ds = _dataset(manifest, root, Split.TRAIN_RETAIN, Purpose.TRAIN, batch_size, max_batches)
-    tune_ds = _dataset(manifest, root, Split.VAL_TUNE, Purpose.TUNE, batch_size, max_batches)
-    test_ds = _dataset(manifest, root, Split.VAL_TEST, Purpose.EVAL, batch_size, max_batches)
-    forget_test_ds = _dataset(
-        manifest, root, Split.VAL_TEST, Purpose.EVAL, batch_size, max_batches, "dog"
+    datasets = build_datasets(
+        manifest, root, batch_size, max_batches, args.tune_only
     )
-    retain_test_ds = _dataset(
-        manifest, root, Split.VAL_TEST, Purpose.EVAL, batch_size, max_batches, "canid"
-    ).concatenate(
-        _dataset(
-            manifest, root, Split.VAL_TEST, Purpose.EVAL, batch_size, max_batches, "other"
-        )
-    )
-    probe_train_ds = forget_ds.concatenate(retain_ds)
+    forget_ds = datasets["forget"]
+    retain_ds = datasets["retain"]
+    tune_ds = datasets["tune"]
 
     teacher = load_resnet50()
-    teacher_test, teacher_labels = collect_logits(teacher, test_ds)
-    original_top1 = float(evaluate(teacher_test, teacher_labels, index)["forget_top1"])
+    teacher_tune = None
+    teacher_test = None
+
+    if args.tune_only:
+        teacher_tune, _ = collect_logits(teacher, tune_ds)
+    else:
+        test_ds = datasets["test"]
+        forget_test_ds = datasets["forget_test"]
+        retain_test_ds = datasets["retain_test"]
+        probe_train_ds = forget_ds.concatenate(retain_ds)
+        teacher_test, teacher_labels = collect_logits(teacher, test_ds)
+        original_top1 = float(
+            evaluate(teacher_test, teacher_labels, index)["forget_top1"]
+        )
 
     for seed in seeds:
         set_seed(seed)
@@ -113,7 +165,10 @@ def main() -> None:
             )
             student = load_resnet50()
             started = time.monotonic()
-            out_dir = out_root / f"{method}_s{seed}"
+            if args.tune_only:
+                out_dir = out_root / "tune" / f"{method}_s{seed}"
+            else:
+                out_dir = out_root / f"{method}_s{seed}"
             trained, curve = train_method(
                 student, forget_ds, retain_ds, tune_ds, run_cfg, index,
                 teacher=teacher, out_dir=out_dir,
@@ -121,42 +176,48 @@ def main() -> None:
             for saved in out_dir.glob("*.keras"):
                 saved.unlink()
 
-            test_logits, test_labels = collect_logits(trained, test_ds)
-            test_logits = finalize_logits(method, test_logits, index)
+            eval_ds = tune_ds if args.tune_only else test_ds
+            eval_logits, eval_labels = collect_logits(trained, eval_ds)
+            eval_logits = finalize_logits(method, eval_logits, index)
+            teacher_logits = teacher_tune if args.tune_only else teacher_test
             record = {
                 "method": method,
                 "seed": seed,
                 "git_sha": _git_sha(),
                 "config": asdict(run_cfg),
                 "run_name": run_name(run_cfg),
-                "metrics": evaluate(test_logits, test_labels, index, teacher_test),
-                "probes": evaluate_probes(
+                "metrics": evaluate(eval_logits, eval_labels, index, teacher_logits),
+                "curve": curve,
+                "runtime_sec": round(time.monotonic() - started, 3),
+                "tune_split": Split.VAL_TUNE.value,
+                "eval_split": eval_split(args.tune_only),
+                "tune_only": bool(args.tune_only),
+            }
+            if not args.tune_only:
+                record["probes"] = evaluate_probes(
                     trained, probe_train_ds, test_ds, index,
                     max_samples=config["probe_max_samples"], seed=seed,
-                ),
-                "mia": run_mia(trained, forget_ds, forget_test_ds, retain_ds, retain_test_ds),
-                "curve": curve,
-            }
-            with tempfile.TemporaryDirectory() as tmp:
-                relearn_path = Path(tmp) / "relearn.csv"
-
-                def factory(selected):
-                    write_manifest(selected, relearn_path, index_path, DataConfig())
-                    return _dataset(
-                        relearn_path, root, Split.RELEARN, Purpose.TRAIN,
-                        batch_size, max_batches,
-                    )
-
-                record["relearning"] = run_relearning(
-                    trained, rows, index, factory, test_ds,
-                    original_top1=original_top1,
-                    budgets=tuple(config["relearning_budgets"]),
-                    epochs=config["relearning_epochs"],
-                    seed=seed,
                 )
-            record["runtime_sec"] = round(time.monotonic() - started, 3)
-            record["tune_split"] = Split.VAL_TUNE.value
-            record["eval_split"] = Split.VAL_TEST.value
+                record["mia"] = run_mia(
+                    trained, forget_ds, forget_test_ds, retain_ds, retain_test_ds
+                )
+                with tempfile.TemporaryDirectory() as tmp:
+                    relearn_path = Path(tmp) / "relearn.csv"
+
+                    def factory(selected):
+                        write_manifest(selected, relearn_path, index_path, DataConfig())
+                        return _dataset(
+                            relearn_path, root, Split.RELEARN, Purpose.TRAIN,
+                            batch_size, max_batches,
+                        )
+
+                    record["relearning"] = run_relearning(
+                        trained, rows, index, factory, test_ds,
+                        original_top1=original_top1,
+                        budgets=tuple(config["relearning_budgets"]),
+                        epochs=config["relearning_epochs"],
+                        seed=seed,
+                    )
             (out_dir / "run.json").write_text(json.dumps(record, indent=2) + "\n")
             print(f"finished {method} seed={seed} -> {out_dir / 'run.json'}")
 
