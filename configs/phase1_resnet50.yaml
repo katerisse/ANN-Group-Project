@@ -1,0 +1,28 @@
+# Phase 1 configuration. Tune only on val_tune; val_test is frozen.
+dataset:
+  root: ~/Documents/imagenet
+  index: manifests/class_index.csv
+  manifest: manifests/phase1_local.csv
+
+seed: 2026
+seeds: [2026, 2027, 2028]
+methods: [original, mask, head_only, retain_only, neggrad, scrub]
+
+batch_size: 8
+steps: 100
+lr: 0.0001
+weight_decay: 0.0
+grad_clip: 1.0
+eval_every: 25
+lambda_retain: 1.0
+scrub_alpha: 1.0
+scrub_beta: 1.0
+patience: 0
+min_delta: 0.0
+save_checkpoints: false
+max_batches: 0  # 0 means the full manifest; small values are CPU proxies only.
+
+probe_max_samples: 4000
+relearning_budgets: [1, 5, 20]
+relearning_epochs: 3
+results_dir: results/phase1
